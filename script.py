@@ -206,8 +206,8 @@ def main():
     print("Instructions: Press F9 to toggle aimbot, press F10 to toggle auto-fire.")
     time.sleep(6)  # Initial delay
     game_window = [(0, 0), (1920, 1080)]  # Update with your game window coordinates
-    yolo_weights_path = "path/to/your/custom/model.weights"
-    yolo_cfg_path = "path/to/your/custom/model.cfg"
+    yolo_weights_path = "assets/yolov3.weights"
+    yolo_cfg_path = "assets/yolov3.cfg"
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
