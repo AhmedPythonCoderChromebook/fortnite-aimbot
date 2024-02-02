@@ -249,3 +249,5 @@ def main():
 
 def run():
     main()
+
+run()
