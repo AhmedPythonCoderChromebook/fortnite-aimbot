@@ -6,6 +6,7 @@ import time
 import logging
 import keyboard
 from pynput.mouse import Controller
+import pygetwindow as gw
 
 class PlayerDetector:
     def __init__(self, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0, average_player_height_cm=180.34):
@@ -128,12 +129,11 @@ class PlayerDetector:
             return None
 
 class FortniteTracker:
-    def __init__(self, window_coordinates, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0, average_player_height_cm=180.34):
-        self.window_coordinates = window_coordinates
+    def __init__(self, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0, average_player_height_cm=180.34):
         self.detector = PlayerDetector(yolo_weights_path, yolo_cfg_path, aimbot_strength, average_player_height_cm)
         self.tracking_event = threading.Event()
         self.tracking_thread = threading.Thread(target=self.track_players, daemon=True)
-        self.window_center = [sum(coord) // 2 for coord in window_coordinates]
+        self.window_center = None
 
     def start_tracking(self):
         self.tracking_event.set()
@@ -152,6 +152,14 @@ class FortniteTracker:
         with self.detector.lock:
             self.detector.auto_fire_enabled = not self.detector.auto_fire_enabled
 
+    def adjust_aimbot_strength_up(self):
+        with self.detector.lock:
+            self.detector.aimbot_strength = min(1.0, self.detector.aimbot_strength + 0.1)
+
+    def adjust_aimbot_strength_down(self):
+        with self.detector.lock:
+            self.detector.aimbot_strength = max(0.1, self.detector.aimbot_strength - 0.1)
+
     def track_players(self):
         try:
             while self.tracking_event.is_set():
@@ -163,7 +171,6 @@ class FortniteTracker:
                     detected_screen = self.detector.detect_players(screen, self.window_center)
 
                     with self.detector.lock:
-                        self.detector.aimbot_strength = 1.0
                         self.detector.is_aimbot_enabled = True
                         self.detector.detect_players(screen, self.window_center)
 
@@ -195,25 +202,29 @@ class FortniteTracker:
 
     def capture_screen(self):
         try:
-            screen = ImageGrab.grab(bbox=(self.window_coordinates[0][0], self.window_coordinates[0][1],
-                                          self.window_coordinates[1][0], self.window_coordinates[1][1]))
-            return cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
+            window = gw.getActiveWindow()
+            if window is not None:
+                self.window_center = [window.left + window.width // 2, window.top + window.height // 2]
+                screen = ImageGrab.grab(bbox=(window.left, window.top, window.left + window.width, window.top + window.height))
+                return cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
+            else:
+                logging.warning("No active window found.")
+                return None
         except Exception as e:
             logging.error(f"Error capturing screen: {e}")
             return None
 
 def main():
     print("Instructions: Press F9 to toggle aimbot, press F10 to toggle auto-fire.")
+    print("Use UP arrow key to increase aimbot strength and DOWN arrow key to decrease aimbot strength.")
     time.sleep(6)  # Initial delay
-    game_window = [(0, 0), (1920, 1080)]  # Update with your game window coordinates
     yolo_weights_path = "assets/yolov3.weights"
     yolo_cfg_path = "assets/yolov3.cfg"
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # Check if YOLO model is loaded successfully
     try:
-        tracker = FortniteTracker(game_window, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0)
+        tracker = FortniteTracker(yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0)
     except SystemExit as e:
         logging.error(f"Exiting due to initialization error: {e}")
         return
@@ -221,6 +232,8 @@ def main():
     try:
         keyboard.add_hotkey('F9', tracker.toggle_aimbot)
         keyboard.add_hotkey('F10', tracker.toggle_auto_fire)
+        keyboard.add_hotkey('UP', tracker.adjust_aimbot_strength_up)
+        keyboard.add_hotkey('DOWN', tracker.adjust_aimbot_strength_down)
 
         tracker.start_tracking()
 
@@ -234,5 +247,5 @@ def main():
         tracker.stop_tracking()
         cv2.destroyAllWindows()
 
-if __name__ == "__main__":
+def run():
     main()
