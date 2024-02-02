@@ -234,5 +234,5 @@ def main():
         tracker.stop_tracking()
         cv2.destroyAllWindows()
 
-def run():
+if __name__ == "__main__":
     main()
