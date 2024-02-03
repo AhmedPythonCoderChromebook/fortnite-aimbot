@@ -1,23 +1,43 @@
-import cv2
-import numpy as np
-from PIL import ImageGrab
-import threading
-import time
-import logging
-import keyboard
-from pynput.mouse import Controller
-import pygetwindow as gw
-import os
+try:
+    import cv2
+    import numpy as np
+    from PIL import ImageGrab
+    import threading
+    import time
+    import logging
+    import keyboard
+    from pynput.mouse import Controller
+    import pygetwindow as gw
+    import os
 
-# Add necessary imports for controller input
-import pygame
+    # Add necessary imports for controller input
+    import pygame
 
-# Initialize pygame for controller input
-pygame.init()
-pygame.joystick.init()
+    # Initialize pygame for controller input
+    pygame.init()
+    pygame.joystick.init()
+
+except ImportError as e:
+    # If there is an import error, prepend 'lib.' before module and library names
+    import lib.cv2 as cv2
+    import lib.numpy as np
+    from lib.PIL import ImageGrab
+    import lib.threading as threading
+    import lib.time as time
+    import lib.logging as logging
+    import lib.keyboard as keyboard
+    from lib.pynput.mouse import Controller
+    import lib.pygetwindow as gw
+    import lib.os as os
+
+    # Add necessary imports for controller input
+    import lib.pygame as pygame
 
 class PlayerDetector:
     def __init__(self, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0, average_player_height_cm=180.34):
+        yolo_weights_path = os.path.join("assets", "yolo", yolo_weights_path)
+        yolo_cfg_path = os.path.join("assets", "yolo", yolo_cfg_path)
+
         try:
             self.net = cv2.dnn.readNet(yolo_weights_path, yolo_cfg_path)
             self.layer_names = self.net.getUnconnectedOutLayersNames()
@@ -33,9 +53,6 @@ class PlayerDetector:
         self.boxes = []
 
     def detect_players(self, frame, center):
-        if not self.is_aimbot_enabled:
-            return frame
-
         height, width, _ = frame.shape
         blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
         self.net.setInput(blob)
@@ -79,18 +96,22 @@ class PlayerDetector:
 
             for i in indices.flatten():
                 x, y, w, h = boxes[i]
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
+                is_player_behind_object = self.is_player_behind_object(frame, x, y, w, h)
+                color = (0, 255, 0) if not is_player_behind_object else (0, 0, 255)
+                
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
 
                 if center is not None:
                     center[0] += x + w // 2 - center[0]
                     center[1] += y + h // 2 - center[1]
 
                 # Draw stickman
-                self.draw_stickman(frame, x, y, w, h)
+                self.draw_stickman(frame, x, y, w, h, color)
 
-                # Draw a red rectangle around the player within a normal radius
+                # Draw a rectangle around the player within a normal radius
                 normal_radius = max(w, h) // 2
-                cv2.rectangle(frame, (x - normal_radius, y - normal_radius), (x + w + normal_radius, y + h + normal_radius), (0, 0, 255), 2)
+                cv2.rectangle(frame, (x - normal_radius, y - normal_radius),
+                              (x + w + normal_radius, y + h + normal_radius), color, 2)
 
                 # Auto-fire if enabled
                 if self.auto_fire_enabled:
@@ -98,16 +119,23 @@ class PlayerDetector:
 
         return frame
 
-    def draw_stickman(self, frame, x, y, w, h):
+    def draw_stickman(self, frame, x, y, w, h, color):
         # Calculate body parts positions
         head_center = (x + w // 2, y)
         shoulder_center = (x + w // 2, y + h // 4 * 3)
         hip_center = (x + w // 2, y + h)
 
         # Draw stickman
-        cv2.circle(frame, head_center, 5, (0, 255, 0), -1)
-        cv2.line(frame, head_center, shoulder_center, (0, 255, 0), 2)
-        cv2.line(frame, shoulder_center, hip_center, (0, 255, 0), 2)
+        cv2.circle(frame, head_center, 5, color, -1)
+        cv2.line(frame, head_center, shoulder_center, color, 2)
+        cv2.line(frame, shoulder_center, hip_center, color, 2)
+
+    def is_player_behind_object(self, frame, x, y, w, h):
+        # Example logic: Check if there is a pixel of a certain color in front of the player
+        # You might need to customize this based on your actual game environment
+        roi = frame[y:y + h, x:x + w]
+        color_threshold = 100  # Example threshold, customize based on your environment
+        return np.any(roi[:, :, 2] > color_threshold)
 
     def auto_fire(self):
         # Implement your auto-fire logic here
@@ -142,6 +170,7 @@ class FortniteTracker:
         self.tracking_event = threading.Event()
         self.tracking_thread = threading.Thread(target=self.track_players, daemon=True)
         self.window_center = None
+        self.is_tracking_paused = False
 
     def start_tracking(self):
         self.tracking_event.set()
@@ -168,34 +197,41 @@ class FortniteTracker:
         with self.detector.lock:
             self.detector.aimbot_strength = max(0.1, self.detector.aimbot_strength - 0.1)
 
+    def toggle_tracking_pause(self):
+        self.is_tracking_paused = not self.is_tracking_paused
+
     def track_players(self):
         try:
             while self.tracking_event.is_set():
                 try:
-                    screen = self.capture_screen()
-                    if screen is None:
-                        continue
+                    if not self.is_tracking_paused:
+                        screen = self.capture_screen()
+                        if screen is None:
+                            continue
 
-                    detected_screen = self.detector.detect_players(screen, self.window_center)
+                        detected_screen = self.detector.detect_players(screen, self.window_center)
 
-                    with self.detector.lock:
-                        self.detector.is_aimbot_enabled = True
-                        self.detector.detect_players(screen, self.window_center)
+                        with self.detector.lock:
+                            self.detector.is_aimbot_enabled = True
+                            self.detector.detect_players(screen, self.window_center)
 
-                        if self.detector.boxes:
-                            self.detector.adjust_aimbot_strength(self.window_center)
+                            if self.detector.boxes:
+                                self.detector.adjust_aimbot_strength(self.window_center)
 
-                    # Get the nearest player distance and display it in meters
-                    nearest_player_distance = self.detector.get_nearest_player_distance()
-                    if nearest_player_distance is not None:
-                        cv2.putText(detected_screen, f"Nearest Player: {nearest_player_distance:.2f}m", (10, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                        # Get the nearest player distance and display it in meters
+                        nearest_player_distance = self.detector.get_nearest_player_distance()
+                        if nearest_player_distance is not None:
+                            cv2.putText(detected_screen, f"Nearest Player: {nearest_player_distance:.2f}m", (10, 30),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
-                    # Display aimbot strength in the corner
-                    cv2.putText(detected_screen, f"Aimbot Strength: {self.detector.aimbot_strength * 100:.0f}%",
-                                (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                        # Display aimbot strength in the corner
+                        cv2.putText(detected_screen, f"Aimbot Strength: {self.detector.aimbot_strength * 100:.0f}%",
+                                    (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
-                    cv2.imshow('Fortnite Tracker', detected_screen)
+                        # Draw ESP boxes around all detected players
+                        self.draw_esp(detected_screen)
+
+                        cv2.imshow('Fortnite Tracker', detected_screen)
 
                 except Exception as e:
                     logging.error(f"Error in tracking loop: {e}")
@@ -207,6 +243,14 @@ class FortniteTracker:
 
         except Exception as e:
             logging.error(f"Error in track_players thread: {e}")
+
+    def draw_esp(self, frame):
+        with self.detector.lock:
+            for box in self.detector.boxes:
+                x, y, w, h = box
+                is_player_behind_object = self.detector.is_player_behind_object(frame, x, y, w, h)
+                color = (0, 255, 0) if not is_player_behind_object else (0, 0, 255)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
 
     def capture_screen(self):
         try:
@@ -225,10 +269,10 @@ class FortniteTracker:
 def main():
     print("Instructions: Press F9 to toggle aimbot, press F10 to toggle auto-fire.")
     print("Use UP arrow key to increase aimbot strength and DOWN arrow key to decrease aimbot strength.")
-    print("Use R1 and R2 buttons together for auto-fire on the controller.")
+    print("Press F6 to pause/resume tracking.")
     time.sleep(6)  # Initial delay
-    yolo_weights_path = "assets/yolov3.weights"
-    yolo_cfg_path = "assets/yolov3.cfg"
+    yolo_weights_path = "yolov3.weights"
+    yolo_cfg_path = "yolov3.cfg"
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -243,6 +287,7 @@ def main():
         keyboard.add_hotkey('F10', tracker.toggle_auto_fire)
         keyboard.add_hotkey('UP', tracker.adjust_aimbot_strength_up)
         keyboard.add_hotkey('DOWN', tracker.adjust_aimbot_strength_down)
+        keyboard.add_hotkey('F6', tracker.toggle_tracking_pause)
 
         # Check if a controller is connected
         joystick_count = pygame.joystick.get_count()
@@ -275,4 +320,5 @@ def main():
 
 def run():
     main()
-run() 
+
+run()
