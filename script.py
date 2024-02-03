@@ -7,6 +7,14 @@ import logging
 import keyboard
 from pynput.mouse import Controller
 import pygetwindow as gw
+import os
+
+# Add necessary imports for controller input
+import pygame
+
+# Initialize pygame for controller input
+pygame.init()
+pygame.joystick.init()
 
 class PlayerDetector:
     def __init__(self, yolo_weights_path, yolo_cfg_path, aimbot_strength=1.0, average_player_height_cm=180.34):
@@ -217,6 +225,7 @@ class FortniteTracker:
 def main():
     print("Instructions: Press F9 to toggle aimbot, press F10 to toggle auto-fire.")
     print("Use UP arrow key to increase aimbot strength and DOWN arrow key to decrease aimbot strength.")
+    print("Use R1 and R2 buttons together for auto-fire on the controller.")
     time.sleep(6)  # Initial delay
     yolo_weights_path = "assets/yolov3.weights"
     yolo_cfg_path = "assets/yolov3.cfg"
@@ -235,6 +244,23 @@ def main():
         keyboard.add_hotkey('UP', tracker.adjust_aimbot_strength_up)
         keyboard.add_hotkey('DOWN', tracker.adjust_aimbot_strength_down)
 
+        # Check if a controller is connected
+        joystick_count = pygame.joystick.get_count()
+        if joystick_count > 0:
+            joystick = pygame.joystick.Joystick(0)
+            joystick.init()
+
+            # Check if R1 and R2 buttons are available
+            if joystick.get_numbuttons() >= 2:
+                print("Controller detected. You can use R1 and R2 buttons together for auto-fire.")
+                while True:
+                    pygame.event.pump()
+                    if joystick.get_button(5) and joystick.get_button(4):
+                        tracker.toggle_auto_fire()
+                    time.sleep(0.01)
+            else:
+                print("Controller detected, but not enough buttons for auto-fire.")
+
         tracker.start_tracking()
 
         while True:
@@ -249,5 +275,4 @@ def main():
 
 def run():
     main()
-
-run()
+run() 
